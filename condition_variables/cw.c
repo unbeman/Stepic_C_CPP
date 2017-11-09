@@ -102,44 +102,26 @@ void wdlock_init(struct wdlock *lock)
    ВАЖНО: функция является частью интерфейса - не меняйте
           ее имя и аргументы.
 */
-
-void wdlock_unlock(struct wdlock_ctx *ctx)
-{
+int wdlock_lock(struct wdlock *current, struct wdlock_ctx *ctx) {
+    assert(current);
     assert(ctx);
-    struct  wdlock *current = ctx->locks;
+    lock(&current->lock);
+    while (current->owner &&  current->owner->timestamp < ctx->timestamp ) {
+            wait(&current->cv, &current->lock);
+    }
+    if (current->owner == NULL) {
+        current->owner = ctx;
+		assert(current->owner->timestamp == ctx->timestamp);		
+		current->next = ctx->locks;
+		ctx->locks = current;		
 
-    while (current != NULL) {
-        assert(current->owner == ctx);
-        current->owner = NULL;
-        notify_all(&current->cv);
+        notify_one(&current->cv);
         unlock(&current->lock);
-        current = current->next;
-    }
-}
-
-int wdlock_lock(struct wdlock *l, struct wdlock_ctx *ctx) {
-    assert(l);
-    assert(ctx);
-    lock(&l->lock);
-    if (l->owner  && ctx->timestamp < l->owner->timestamp) {
-        while (l->owner &&  l->owner->timestamp < ctx->timestamp ) {
-            wait(&l->cv, &l->lock);
-        }
-    }
-    if (l->owner == NULL) {
-        l->owner = ctx;
-
-        struct wdlock *tmp = ctx->locks;
-        ctx->locks = l;
-        ctx->locks->next = tmp;
-        notify_one(&l->cv);
-        unlock(&l->lock);
         return 1;
     }
-    else { //if (current->owner != NULL && ctx->timestamp >= current->owner->timestamp)
-        notify_one(&l->cv);
-        wdlock_unlock(ctx);
-        unlock(&l->lock);
+    else {
+        notify_one(&current->cv);
+        unlock(&current->lock);
         return 0;
     }
 }
@@ -152,4 +134,15 @@ int wdlock_lock(struct wdlock *l, struct wdlock_ctx *ctx) {
    ВАЖНО: функция является частью интерфейса - не меняйте
           ее имя и аргументы.
 */
-
+void wdlock_unlock(struct wdlock_ctx *ctx)
+{
+    assert(ctx);
+    struct  wdlock *current = ctx->locks;
+    while (current != NULL) {
+        lock(&current->lock);
+		current->owner = NULL;
+        notify_all(&current->cv);
+        unlock(&current->lock);
+        current = current->next;
+    }
+}
